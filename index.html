@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<title>Človeče, nezlom sa — tlačidlo Hrať (automatický krok)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{
+  --bg:#071026; --accent:#ff5c9e;
+  --p0:#ff6b6b; --p1:#4dffb3; --p2:#4da6ff; --p3:#ffd24d; --p4:#b84dff; --p5:#4dffec;
+  --p6:#ff9f43; --p7:#7effa1; --p8:#9fb7ff; --p9:#ffd6a5; --p10:#c58bff;
+  --safe:#2b2f3a; --text:#e6eef8;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:linear-gradient(135deg,#041026 0%,#071026 100%);color:var(--text);display:flex;flex-direction:column;align-items:center;padding:18px}
+.container{width:980px;max-width:98%;display:grid;grid-template-columns:640px 1fr;gap:18px}
+.board-wrap{background:linear-gradient(180deg,#081226,#0b1a2b);padding:14px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.board{width:612px;height:612px;background:linear-gradient(180deg,#0b1220,#071026);border-radius:10px;padding:10px;display:grid;grid-template-columns:repeat(11,1fr);grid-template-rows:repeat(11,1fr);gap:4px}
+.cell{background:rgba(255,255,255,0.03);border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative;transition:transform .18s}
+.cell.safe{background:linear-gradient(180deg,var(--safe),rgba(255,255,255,0.02))}
+.piece{width:36px;height:36px;border-radius:50%;box-shadow:0 6px 12px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-weight:700;color:#071026;cursor:pointer;transition:transform .12s}
+.hud{display:flex;flex-direction:column;gap:12px;padding:12px;background:linear-gradient(180deg,#071026,#0b1220);border-radius:12px;min-height:612px}
+.header{display:flex;align-items:center;justify-content:space-between}
+.title{font-size:18px;font-weight:700;color:var(--text)}
+.controls{display:flex;gap:8px;align-items:center}
+.btn{background:var(--accent);border:none;padding:10px 14px;border-radius:10px;color:#071026;font-weight:800;cursor:pointer}
+.small{background:#1b2330;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03)}
+.players{display:flex;flex-direction:column;gap:8px;margin-top:8px;max-height:360px;overflow:auto}
+.player{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.01),transparent)}
+.color-dot{width:18px;height:18px;border-radius:50%;box-shadow:0 4px 8px rgba(0,0,0,.5)}
+.score{font-weight:800;color:var(--text)}
+.status{margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02)}
+.legend{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.legend .item{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.02);font-size:12px}
+.dice{width:56px;height:56px;border-radius:10px;background:#0f1724;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:20px}
+.turn-indicator{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.02);font-weight:700}
+.counter{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.02);font-weight:700}
+</style>
+</head>
+<body>
+<h3>Človeče, nezlom sa — tlačidlo Hrať (automatický krok)</h3>
+<div class="container">
+  <div class="board-wrap">
+    <div id="board" class="board"></div>
+  </div>
+
+  <div class="hud">
+    <div class="header">
+      <div class="title">Ty vs dynamické boty</div>
+      <div class="controls">
+        <div id="dice" class="dice">—</div>
+        <button id="roll" class="btn">Hodiť kockou</button>
+        <button id="autoStep" class="btn" title="Stlač pre automatický 1 krok">Hrať</button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+      <select id="aiMode" class="small">
+        <option value="easy">AI: Ľahký</option>
+        <option value="medium">AI: Stredný</option>
+        <option value="pro">AI: Profesionál</option>
+        <option value="aggressive" selected>AI: Agresívny</option>
+      </select>
+      <div id="turn" class="turn-indicator">Stav: čaká sa</div>
+      <div id="stepsLeft" class="counter">Kroky: 0</div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+      <label class="small">Pridať botov za kolo</label>
+      <input id="botsPerRound" type="number" min="0" max="3" value="1" style="width:64px;padding:6px;border-radius:6px;background:#0f1724;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+      <label class="small">Max botov</label>
+      <input id="maxBots" type="number" min="1" max="20" value="12" style="width:64px;padding:6px;border-radius:6px;background:#0f1724;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+    </div>
+
+    <div class="players" id="playersList"></div>
+
+    <div class="status" id="log">Pripravené. Klikni Hodiť kockou alebo stlač Hrať pre automatický krok.</div>
+    <div class="legend">
+      <div class="item">Bodovanie: +5 za vyhodenie; +10 za dovlečenie do cieľa</div>
+      <div class="item">Po každom kole sa pridajú noví boti</div>
+      <div class="item">Tlačidlo Hrať vykoná 1 krok za teba</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// KONFIGURÁCIA
+const INITIAL_BOTS = 5;
+const PIECES_PER_PLAYER = 4;
+const PATH_LENGTH = 52;
+const START_POS = [0,9,18,27,36,45];
+const SAFE_POSITIONS = new Set([0,8,13,21,26,34,39,47]);
+const COLOR_POOL = ['var(--p0)','var(--p1)','var(--p2)','var(--p3)','var(--p4)','var(--p5)','var(--p6)','var(--p7)','var(--p8)','var(--p9)','var(--p10)'];
+
+// STAV HRY
+let players = [];
+let turn = 0;
+let diceValue = 0;
+let stepsRemaining = 0;
+let canRoll = true;
+let awaitingClicks = false;
+let roundCounter = 0;
+
+// UI
+const boardEl = document.getElementById('board');
+const rollBtn = document.getElementById('roll');
+const autoBtn = document.getElementById('autoStep');
+const diceEl = document.getElementById('dice');
+const logEl = document.getElementById('log');
+const turnEl = document.getElementById('turn');
+const stepsLeftEl = document.getElementById('stepsLeft');
+const aiModeSel = document.getElementById('aiMode');
+const botsPerRoundInput = document.getElementById('botsPerRound');
+const maxBotsInput = document.getElementById('maxBots');
+const playersListEl = document.getElementById('playersList');
+
+// VIZUÁL: vytvor 11x11 buniek
+for(let i=0;i<121;i++){
+  const c = document.createElement('div');
+  c.className='cell';
+  c.dataset.idx = i;
+  boardEl.appendChild(c);
+}
+const pathToCell = [];
+(function mapPathToCells(){
+  const cells = document.querySelectorAll('.cell');
+  for(let i=0;i<PATH_LENGTH;i++){
+    pathToCell[i] = cells[i];
+    if(SAFE_POSITIONS.has(i)) pathToCell[i].classList.add('safe');
+  }
+})();
+
+// Inicializácia
+function initGame(){
+  players = [];
+  players.push({id:0,name:'Ty',color:COLOR_POOL[0],pieces:Array(PIECES_PER_PLAYER).fill(-1),score:0});
+  for(let i=1;i<=INITIAL_BOTS;i++) players.push(makeBot(i));
+  turn = 0; diceValue = 0; stepsRemaining = 0; canRoll = true; awaitingClicks=false; roundCounter=0;
+  renderBoard(); updateTurnUI(); addLog('Hra pripravená. Klikni Hodiť kockou alebo stlač Hrať.');
+}
+function makeBot(id){
+  const color = COLOR_POOL[id % COLOR_POOL.length];
+  return {id:id, name:`Bot_${Math.floor(Math.random()*900+100)}`, color:color, pieces:Array(PIECES_PER_PLAYER).fill(-1), score:0};
+}
+
+// UDALOSTI
+rollBtn.addEventListener('click', async ()=>{
+  if(turn !== 0){ addLog('Nie je tvoj ťah'); return; }
+  if(!canRoll){ addLog('Počkajte'); return; }
+  await playerRoll();
+});
+autoBtn.addEventListener('click', async ()=>{
+  // Hrať = vykonať 1 automatický krok za hráča
+  if(turn !== 0){ addLog('Nie je tvoj ťah'); return; }
+  if(canRoll && stepsRemaining===0){
+    // ak ešte nehodil, najprv hodiť a potom vykonať 1 krok (ak je možné)
+    diceValue = rollDice();
+    diceEl.textContent = diceValue;
+    stepsRemaining = diceValue;
+    addLog(`Automaticky hodené: ${diceValue}. Vykonávam 1 krok.`);
+    canRoll = false;
+  }
+  if(stepsRemaining>0){
+    // vyber najlepší 1-krokový ťah pre hráča a vykonaj ho
+    const moves = getAnyStepMoves(players[0]);
+    if(moves.length===0){
+      addLog('Žiadny možný krok pre tento hod');
+      stepsRemaining = 0;
+      enablePlayerPieceClicks(false);
+      await sleep(400);
+      endTurn(diceValue===6);
+      return;
+    }
+    const chosen = choosePlayerAutoMove(moves);
+    await movePieceTo(0, chosen.pieceIndex, chosen.newPos);
+    stepsRemaining--;
+    stepsLeftEl.textContent = `Kroky: ${stepsRemaining}`;
+    renderBoard();
+    if(stepsRemaining<=0){
+      await sleep(300);
+      endTurn(diceValue===6);
+    } else {
+      addLog(`Automatický krok vykonaný. Zostáva ${stepsRemaining} krokov.`);
+    }
+  } else {
+    addLog('Najprv hodiť kockou (stlač Hodiť kockou alebo Hrať pre automatický hod).');
+  }
+});
+
+// Hráč: hod a kliky (pôvodná logika)
+async function playerRoll(){
+  diceValue = rollDice();
+  diceEl.textContent = diceValue;
+  stepsRemaining = diceValue;
+  stepsLeftEl.textContent = `Kroky: ${stepsRemaining}`;
+  addLog(`Hodil si ${diceValue}. Klikaj figúrku ${stepsRemaining}× (každý klik = 1 krok).`);
+  canRoll = false;
+  awaitingClicks = true;
+  enablePlayerPieceClicks(true);
+  const moves = getAnyStepMoves(players[0]);
+  if(moves.length===0){
+    addLog('Žiadny ťah pre tento hod');
+    awaitingClicks = false;
+    enablePlayerPieceClicks(false);
+    await sleep(600);
+    endTurn(diceValue===6);
+  }
+}
+function enablePlayerPieceClicks(enable){
+  document.querySelectorAll('.piece').forEach(el=>{
+    const pid = parseInt(el.dataset.player);
+    if(pid===0){
+      if(enable) el.addEventListener('click', onPlayerStepClick);
+      else el.removeEventListener('click', onPlayerStepClick);
+    }
+  });
+}
+async function onPlayerStepClick(e){
+  if(!awaitingClicks) return;
+  const pindex = parseInt(e.currentTarget.dataset.pindex);
+  const player = players[0];
+  const pos = player.pieces[pindex];
+  if(pos===-1){
+    if(diceValue!==6){ addLog('Nemôžeš nasadiť túto figúrku'); return; }
+    const start = getStartForPlayer(0);
+    if(isOccupiedBy(0,start)){ addLog('Štart obsadený tvojou figúrkou'); return; }
+    await movePieceTo(0,pindex,start);
+  } else {
+    const newPos = (pos + 1) % PATH_LENGTH;
+    await movePieceTo(0,pindex,newPos);
+  }
+  stepsRemaining--;
+  stepsLeftEl.textContent = `Kroky: ${stepsRemaining}`;
+  renderBoard();
+  if(stepsRemaining<=0){
+    awaitingClicks = false;
+    enablePlayerPieceClicks(false);
+    await sleep(300);
+    endTurn(diceValue===6);
+  } else {
+    addLog(`Zostáva ${stepsRemaining} krokov.`);
+  }
+}
+
+// BOT: vykoná kroky postupne
+async function botPlay(pIdx){
+  const p = players[pIdx];
+  diceValue = rollDice();
+  diceEl.textContent = diceValue;
+  stepsRemaining = diceValue;
+  stepsLeftEl.textContent = `Kroky: ${stepsRemaining}`;
+  addLog(`${p.name} hodil ${diceValue}`);
+  await sleep(300);
+  while(stepsRemaining>0){
+    const moves = getStepMovesForBot(p, aiModeSel.value);
+    if(moves.length===0){ addLog(`${p.name} nemá ďalší krok`); break; }
+    const chosen = chooseBotStep(p, moves, aiModeSel.value);
+    if(!chosen) break;
+    await movePieceTo(p.id, chosen.pieceIndex, chosen.newPos);
+    renderBoard();
+    stepsRemaining--;
+    stepsLeftEl.textContent = `Kroky: ${stepsRemaining}`;
+    await sleep(250 + Math.random()*200);
+  }
+  await sleep(200);
+  endTurn(diceValue===6);
+}
+
+// Pomocné pohybové funkcie
+function getStartForPlayer(playerId){
+  if(playerId < START_POS.length) return START_POS[playerId];
+  return START_POS[playerId % START_POS.length];
+}
+function getAnyStepMoves(player){
+  const moves = [];
+  for(let i=0;i<PIECES_PER_PLAYER;i++){
+    const pos = player.pieces[i];
+    if(pos===-1){
+      if(diceValue===6){
+        const start = getStartForPlayer(player.id);
+        if(!isOccupiedBy(player.id,start)) moves.push({pieceIndex:i,newPos:start,isEnter:true,willCapture:willCaptureAt(start,player.id)});
+      }
+    } else {
+      const newPos = (pos + 1) % PATH_LENGTH;
+      moves.push({pieceIndex:i,newPos:newPos,isEnter:false,willCapture:willCaptureAt(newPos,player.id)});
+    }
+  }
+  return moves;
+}
+function getStepMovesForBot(player, mode){ return getAnyStepMoves(player); }
+
+// Výber automatického ťahu pre hráča (pri stlačení Hrať)
+function choosePlayerAutoMove(moves){
+  // prefer vyhodenie, potom nasadenie, potom najväčší progres
+  let m = moves.find(x=>x.willCapture);
+  if(m) return m;
+  m = moves.find(x=>x.isEnter);
+  if(m) return m;
+  // inak najväčší progress (tu zjednodušené: náhodne medzi dostupnými)
+  moves.sort((a,b)=> (b.newPos - a.newPos));
+  return moves[0];
+}
+
+// Výber kroku pre bota (heuristiky)
+function chooseBotStep(player, moves, mode){
+  if(moves.length===0) return null;
+  if(mode==='easy') return moves[Math.floor(Math.random()*moves.length)];
+  if(mode==='medium') return moves.find(m=>m.willCapture) || moves[0];
+  if(mode==='pro'){
+    let best=null, bestScore=-Infinity;
+    for(const m of moves){
+      let s=0;
+      if(m.willCapture) s+=40;
+      if(SAFE_POSITIONS.has(m.newPos)) s+=10;
+      s += progressHeuristic(player.id,m.newPos);
+      if(s>bestScore){ bestScore=s; best=m; }
+    }
+    return best;
+  }
+  // aggressive
+  let best=null, bestScore=-Infinity;
+  for(const m of moves){
+    let s=0;
+    if(m.willCapture){
+      if(capturedIsPlayer(m.newPos)) s+=120; else s+=60;
+    }
+    if(blocksPlayerStart(m.newPos)) s+=80;
+    s += proximityToPlayerPieces(m.newPos)*8;
+    if(s>bestScore){ bestScore=s; best=m; }
+  }
+  return best;
+}
+function capturedIsPlayer(pos){ for(const p of players[0].pieces) if(p===pos) return true; return false; }
+function blocksPlayerStart(pos){ return pos === getStartForPlayer(0); }
+function proximityToPlayerPieces(pos){ let count=0; for(const p of players[0].pieces) if(p>=0){ const diff = Math.min(Math.abs(p-pos), PATH_LENGTH - Math.abs(p-pos)); if(diff<=4) count++; } return count; }
+function progressHeuristic(playerId,pos){ const start = getStartForPlayer(playerId); let diff = (pos - start + PATH_LENGTH) % PATH_LENGTH; return diff; }
+function isOccupiedBy(playerId,pos){ for(const pl of players){ for(const p of pl.pieces){ if(p===pos && pl.id===playerId) return true; } } return false; }
+function willCaptureAt(pos, playerId){ if(SAFE_POSITIONS.has(pos)) return false; for(const pl of players){ if(pl.id===playerId) continue; for(const p of pl.pieces) if(p===pos) return true; } return false; }
+
+// Presun figúrky a vyhodenie
+async function movePieceTo(playerId, pieceIndex, newPos){
+  const player = players.find(x=>x.id===playerId);
+  const oldPos = player.pieces[pieceIndex];
+  for(const pl of players){
+    if(pl.id===playerId) continue;
+    for(let i=0;i<PIECES_PER_PLAYER;i++){
+      if(pl.pieces[i]===newPos && !SAFE_POSITIONS.has(newPos)){
+        pl.pieces[i] = -1;
+        player.score += 5;
+        addLog(`${player.name} vyhodil ${pl.name} (figúrka ${i+1}) +5b`);
+        await sleep(180);
+      }
+    }
+  }
+  player.pieces[pieceIndex] = newPos;
+  if(oldPos>=0 && progressTowardsGoal(playerId,newPos) < progressTowardsGoal(playerId,oldPos)){
+    player.score += 10;
+    addLog(`${player.name} získal +10b za postup`);
+    await sleep(160);
+  }
+  renderBoard();
+}
+
+// Progres a koniec ťahu
+function progressTowardsGoal(playerId,pos){ const start = getStartForPlayer(playerId); let diff = (pos - start + PATH_LENGTH) % PATH_LENGTH; return PATH_LENGTH - diff; }
+function endTurn(extraRoll){
+  const prevTurn = turn;
+  if(!extraRoll) turn = (turn + 1) % players.length;
+  updateTurnUI();
+  if(turn===0){
+    canRoll = true;
+    addLog('Tvoj ťah');
+    if(prevTurn === players.length - 1){
+      roundCounter++;
+      addBotsAfterRound();
+    }
+  } else {
+    setTimeout(()=>botPlay(turn), 400);
+  }
+}
+
+// Pridávanie botov po kole
+function addBotsAfterRound(){
+  const toAdd = parseInt(botsPerRoundInput.value) || 0;
+  const maxBots = parseInt(maxBotsInput.value) || 12;
+  const currentBots = players.length - 1;
+  const canAdd = Math.max(0, Math.min(toAdd, maxBots - currentBots));
+  if(canAdd <= 0) { addLog(`Max botov dosiahnutý (${currentBots})`); return; }
+  const startId = players.length;
+  for(let i=0;i<canAdd;i++){
+    const newId = startId + i;
+    const bot = makeBot(newId);
+    players.push(bot);
+    addLog(`Pridal sa nový bot: ${bot.name}`);
+  }
+  renderBoard();
+  updateTurnUI();
+}
+
+// RENDER
+function renderBoard(){
+  document.querySelectorAll('.cell').forEach(c=>c.innerHTML='');
+  for(const pl of players){
+    for(let i=0;i<PIECES_PER_PLAYER;i++){
+      const pos = pl.pieces[i];
+      if(pos>=0 && pathToCell[pos]){
+        const el = document.createElement('div');
+        el.className = 'piece';
+        el.style.background = pl.color;
+        el.textContent = i+1;
+        el.dataset.player = pl.id;
+        el.dataset.pindex = i;
+        pathToCell[pos].appendChild(el);
+      }
+    }
+  }
+  renderPlayersList();
+}
+function renderPlayersList(){
+  playersListEl.innerHTML = '';
+  for(const pl of players){
+    const row = document.createElement('div');
+    row.className = 'player';
+    row.innerHTML = `<div style="display:flex;gap:8px;align-items:center"><div class="color-dot" style="background:${pl.color}"></div><div style="min-width:120px">${pl.name}</div></div><div style="text-align:right"><div class="score">${pl.score} b</div></div>`;
+    playersListEl.appendChild(row);
+  }
+}
+function updateTurnUI(){ turnEl.textContent = `Ťah: ${players[turn].name}`; stepsLeftEl.textContent = `Kroky: ${stepsRemaining}`; }
+function rollDice(){ return Math.floor(Math.random()*6)+1; }
+function addLog(txt){ logEl.textContent = txt; }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// Štart
+initGame();
+
+// Externé príkazy pre ladenie
+window.resetGame = function(){ initGame(); };
+</script>
+</body>
+</html>
