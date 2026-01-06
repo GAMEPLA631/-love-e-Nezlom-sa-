@@ -2,7 +2,7 @@
 <html lang="sk">
 <head>
 <meta charset="utf-8">
-<title>Človeče, nezlom sa — tlačidlo Hrať (automatický krok)</title>
+<title>Človeče, nezlom sa</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{
@@ -35,10 +35,16 @@ body{margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:linear-gradi
 .dice{width:56px;height:56px;border-radius:10px;background:#0f1724;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:20px}
 .turn-indicator{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.02);font-weight:700}
 .counter{padding:6px 8px;border-radius:8px;background:rgba(255,255,255,0.02);font-weight:700}
+.timer{font-weight:900;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,0.03);font-size:16px}
+.result-overlay{position:fixed;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999;visibility:hidden;opacity:0;transition:opacity .2s}
+.result-card{background:#071026;padding:24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.7);color:var(--text);min-width:320px;text-align:center}
+.result-card h2{margin:0 0 8px 0}
+.result-card p{margin:8px 0}
+.result-card button{margin-top:12px}
 </style>
 </head>
 <body>
-<h3>Človeče, nezlom sa — tlačidlo Hrať (automatický krok)</h3>
+<h3>Človeče, nezlom sa — časovač 28:50, vyhodnotenie a reštart</h3>
 <div class="container">
   <div class="board-wrap">
     <div id="board" class="board"></div>
@@ -63,23 +69,32 @@ body{margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:linear-gradi
       </select>
       <div id="turn" class="turn-indicator">Stav: čaká sa</div>
       <div id="stepsLeft" class="counter">Kroky: 0</div>
+      <div id="timer" class="timer">28:50</div>
     </div>
 
     <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
       <label class="small">Pridať botov za kolo</label>
       <input id="botsPerRound" type="number" min="0" max="3" value="1" style="width:64px;padding:6px;border-radius:6px;background:#0f1724;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
       <label class="small">Max botov</label>
-      <input id="maxBots" type="number" min="1" max="20" value="12" style="width:64px;padding:6px;border-radius:6px;background:#0f1724;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+      <input id="maxBots" type="number" min="1" max="30" value="12" style="width:64px;padding:6px;border-radius:6px;background:#0f1724;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
     </div>
 
     <div class="players" id="playersList"></div>
 
     <div class="status" id="log">Pripravené. Klikni Hodiť kockou alebo stlač Hrať pre automatický krok.</div>
     <div class="legend">
-      <div class="item">Bodovanie: +5 za vyhodenie; +10 za dovlečenie do cieľa</div>
-      <div class="item">Po každom kole sa pridajú noví boti</div>
-      <div class="item">Tlačidlo Hrať vykoná 1 krok za teba</div>
+      <div class="item">Bodovanie: +5 za vyhodenie; +10 za dovlečenie do cieľa (zjednodušené)</div>
+      <div class="item">Hra beží na čas: 28:50; po vypršaní sa vyhodnotí víťaz a začne nová hra</div>
     </div>
+  </div>
+</div>
+
+<!-- výsledkové okno -->
+<div id="resultOverlay" class="result-overlay">
+  <div class="result-card">
+    <h2 id="resultTitle">Víťaz</h2>
+    <p id="resultText"></p>
+    <button id="closeResult" class="btn">OK — spustiť novú hru</button>
   </div>
 </div>
 
@@ -92,7 +107,9 @@ const START_POS = [0,9,18,27,36,45];
 const SAFE_POSITIONS = new Set([0,8,13,21,26,34,39,47]);
 const COLOR_POOL = ['var(--p0)','var(--p1)','var(--p2)','var(--p3)','var(--p4)','var(--p5)','var(--p6)','var(--p7)','var(--p8)','var(--p9)','var(--p10)'];
 
-// STAV HRY
+// ČASOVAČ: 28 minút 50 sekúnd = 1730 sekúnd
+const GAME_SECONDS = 28 * 60 + 50;
+
 let players = [];
 let turn = 0;
 let diceValue = 0;
@@ -101,7 +118,12 @@ let canRoll = true;
 let awaitingClicks = false;
 let roundCounter = 0;
 
-// UI
+// timer state
+let remainingSeconds = GAME_SECONDS;
+let timerInterval = null;
+let timerRunning = false;
+
+// UI prvky
 const boardEl = document.getElementById('board');
 const rollBtn = document.getElementById('roll');
 const autoBtn = document.getElementById('autoStep');
@@ -109,10 +131,15 @@ const diceEl = document.getElementById('dice');
 const logEl = document.getElementById('log');
 const turnEl = document.getElementById('turn');
 const stepsLeftEl = document.getElementById('stepsLeft');
+const timerEl = document.getElementById('timer');
 const aiModeSel = document.getElementById('aiMode');
 const botsPerRoundInput = document.getElementById('botsPerRound');
 const maxBotsInput = document.getElementById('maxBots');
 const playersListEl = document.getElementById('playersList');
+const resultOverlay = document.getElementById('resultOverlay');
+const resultTitle = document.getElementById('resultTitle');
+const resultText = document.getElementById('resultText');
+const closeResult = document.getElementById('closeResult');
 
 // VIZUÁL: vytvor 11x11 buniek
 for(let i=0;i<121;i++){
@@ -130,12 +157,15 @@ const pathToCell = [];
   }
 })();
 
-// Inicializácia
+// Inicializácia hry a timeru
 function initGame(){
   players = [];
   players.push({id:0,name:'Ty',color:COLOR_POOL[0],pieces:Array(PIECES_PER_PLAYER).fill(-1),score:0});
   for(let i=1;i<=INITIAL_BOTS;i++) players.push(makeBot(i));
   turn = 0; diceValue = 0; stepsRemaining = 0; canRoll = true; awaitingClicks=false; roundCounter=0;
+  remainingSeconds = GAME_SECONDS;
+  stopTimer();
+  startTimer();
   renderBoard(); updateTurnUI(); addLog('Hra pripravená. Klikni Hodiť kockou alebo stlač Hrať.');
 }
 function makeBot(id){
@@ -143,17 +173,91 @@ function makeBot(id){
   return {id:id, name:`Bot_${Math.floor(Math.random()*900+100)}`, color:color, pieces:Array(PIECES_PER_PLAYER).fill(-1), score:0};
 }
 
-// UDALOSTI
+// TIMER: spusti / zastav / aktualizuj
+function startTimer(){
+  if(timerRunning) return;
+  timerRunning = true;
+  updateTimerDisplay();
+  timerInterval = setInterval(()=>{
+    remainingSeconds--;
+    updateTimerDisplay();
+    if(remainingSeconds <= 0){
+      remainingSeconds = 0;
+      updateTimerDisplay();
+      stopTimer();
+      onTimeExpired();
+    }
+  }, 1000);
+}
+function stopTimer(){
+  timerRunning = false;
+  if(timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+function updateTimerDisplay(){
+  const mm = Math.floor(remainingSeconds / 60).toString().padStart(2,'0');
+  const ss = (remainingSeconds % 60).toString().padStart(2,'0');
+  timerEl.textContent = `${mm}:${ss}`;
+}
+
+// Keď čas vyprší: vyhodnotiť víťaza a reštartovať
+function onTimeExpired(){
+  addLog('Čas vypršal — vyhodnocujem výsledok...');
+  const winner = evaluateWinner();
+  showResult(winner);
+}
+
+// Vyhodnotenie víťaza: najvyššie skóre; pri rovnosti súčet progresu (väčší = lepší)
+function evaluateWinner(){
+  // pre každý hráč spočítame sumu progresu (väčšia = bližšie k cieľu)
+  function totalProgress(pl){
+    let sum = 0;
+    for(const pos of pl.pieces){
+      if(pos >= 0){
+        const start = getStartForPlayer(pl.id);
+        const diff = (pos - start + PATH_LENGTH) % PATH_LENGTH;
+        sum += diff;
+      }
+    }
+    return sum;
+  }
+  // nájdeme max podľa skóre, potom podľa progresu
+  let best = players[0];
+  for(const pl of players){
+    if(pl.score > best.score) best = pl;
+    else if(pl.score === best.score){
+      if(totalProgress(pl) > totalProgress(best)) best = pl;
+    }
+  }
+  // zostav krátky report
+  const report = players.map(pl=>{
+    return `${pl.name}: ${pl.score} b, progres ${totalProgress(pl)}`;
+  }).join('\n');
+  return {winner: best, report};
+}
+function showResult(result){
+  resultTitle.textContent = `Víťaz: ${result.winner.name}`;
+  resultText.textContent = `Skóre: ${result.winner.score} b\n\nDetaily:\n${result.report}`;
+  resultOverlay.style.visibility = 'visible';
+  resultOverlay.style.opacity = '1';
+  // po 4 sekundách automaticky zatvoríme a reštartujeme, alebo hráč môže stlačiť OK
+  setTimeout(()=>{ closeResult.click(); }, 4000);
+}
+closeResult.addEventListener('click', ()=>{
+  resultOverlay.style.opacity = '0';
+  resultOverlay.style.visibility = 'hidden';
+  // krátke oneskorenie a reštart
+  setTimeout(()=>{ initGame(); }, 300);
+});
+
+// Hra: udalosti tlačidiel
 rollBtn.addEventListener('click', async ()=>{
   if(turn !== 0){ addLog('Nie je tvoj ťah'); return; }
   if(!canRoll){ addLog('Počkajte'); return; }
   await playerRoll();
 });
 autoBtn.addEventListener('click', async ()=>{
-  // Hrať = vykonať 1 automatický krok za hráča
   if(turn !== 0){ addLog('Nie je tvoj ťah'); return; }
   if(canRoll && stepsRemaining===0){
-    // ak ešte nehodil, najprv hodiť a potom vykonať 1 krok (ak je možné)
     diceValue = rollDice();
     diceEl.textContent = diceValue;
     stepsRemaining = diceValue;
@@ -161,12 +265,10 @@ autoBtn.addEventListener('click', async ()=>{
     canRoll = false;
   }
   if(stepsRemaining>0){
-    // vyber najlepší 1-krokový ťah pre hráča a vykonaj ho
     const moves = getAnyStepMoves(players[0]);
     if(moves.length===0){
       addLog('Žiadny možný krok pre tento hod');
       stepsRemaining = 0;
-      enablePlayerPieceClicks(false);
       await sleep(400);
       endTurn(diceValue===6);
       return;
@@ -187,7 +289,7 @@ autoBtn.addEventListener('click', async ()=>{
   }
 });
 
-// Hráč: hod a kliky (pôvodná logika)
+// Hráč: klasický roll + kliky
 async function playerRoll(){
   diceValue = rollDice();
   diceEl.textContent = diceValue;
@@ -242,7 +344,7 @@ async function onPlayerStepClick(e){
   }
 }
 
-// BOT: vykoná kroky postupne
+// BOT: krok-po-kroku
 async function botPlay(pIdx){
   const p = players[pIdx];
   diceValue = rollDice();
@@ -289,19 +391,15 @@ function getAnyStepMoves(player){
 }
 function getStepMovesForBot(player, mode){ return getAnyStepMoves(player); }
 
-// Výber automatického ťahu pre hráča (pri stlačení Hrať)
+// Výbery ťahov
 function choosePlayerAutoMove(moves){
-  // prefer vyhodenie, potom nasadenie, potom najväčší progres
   let m = moves.find(x=>x.willCapture);
   if(m) return m;
   m = moves.find(x=>x.isEnter);
   if(m) return m;
-  // inak najväčší progress (tu zjednodušené: náhodne medzi dostupnými)
   moves.sort((a,b)=> (b.newPos - a.newPos));
   return moves[0];
 }
-
-// Výber kroku pre bota (heuristiky)
 function chooseBotStep(player, moves, mode){
   if(moves.length===0) return null;
   if(mode==='easy') return moves[Math.floor(Math.random()*moves.length)];
@@ -430,7 +528,7 @@ function rollDice(){ return Math.floor(Math.random()*6)+1; }
 function addLog(txt){ logEl.textContent = txt; }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-// Štart
+// Štart hry
 initGame();
 
 // Externé príkazy pre ladenie
@@ -438,3 +536,5 @@ window.resetGame = function(){ initGame(); };
 </script>
 </body>
 </html>
+
+
